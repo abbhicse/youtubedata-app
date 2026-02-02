@@ -1,15 +1,17 @@
 import streamlit as st
+import pandas as pd
 from database import get_query_results
 
+# Page title
 st.title("Database Query Interface")
 
-# Use stored DB connection from session state
-conn = st.session_state.get("db_connection")
-
+# Get DB connection
+conn = st.session_state.get("conn")
 if not conn:
     st.error("Database is not connected. Please run 'App Initialization' first.")
+    st.stop()
 
-# Query Selection
+# Available queries
 query_options = {
     "What are the names of all the videos and their corresponding channels?": "video_channel_names",
     "Which channels have the most number of videos, and how many?": "most_videos_channels",
@@ -22,20 +24,23 @@ query_options = {
     "What is the average duration of all videos in each channel?": "average_video_duration",
     "Which videos have the highest number of comments, and what are their channels?": "most_commented_videos"
 }
+
+# User selects a query
 query_label = st.selectbox("Select a query to execute", list(query_options.keys()))
 query_type = query_options[query_label]
 
-def execute_query(conn, query_type):
-    """Execute the selected query and display results."""
+# Button to run query
+if st.button("Run Query"):
     try:
         results = get_query_results(conn, query_type)
-        st.write(f"Results for: *{query_type}*")
+
+        st.subheader(f"Results for: {query_label}")
+        
+        # Convert to DataFrame if it's a list of dicts
         if results:
-            st.dataframe(results)
+            df = pd.DataFrame(results)
+            st.dataframe(df)
         else:
             st.info("No results found.")
     except Exception as e:
-        st.error(f"Query execution error: {e}")
-
-if st.button("Run Query"):
-    execute_query(conn, query_type)
+        st.error(f"An error occurred while executing the query: {e}")

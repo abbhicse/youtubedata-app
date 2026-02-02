@@ -5,6 +5,7 @@ import os
 
 # -------------------- SETUP --------------------
 os.makedirs("logs", exist_ok=True)
+
 logging.basicConfig(
     filename="logs/database.log",
     level=logging.INFO,
@@ -12,7 +13,6 @@ logging.basicConfig(
 )
 
 def connect_to_db(host, user, password, database=None):
-    print(f"Connecting to MySQL... host={host}, user={user}, db={database}")
     try:
         conn = sql.connect(
             host=host,
@@ -21,7 +21,7 @@ def connect_to_db(host, user, password, database=None):
             database=database,
             use_pure=True
         )
-        logging.info("Connected to MySQL successfully.")
+        logging.info(f"Connected to MySQL server at {host}, database={database or 'None'}")
         return conn
     except Exception as e:
         logging.error(f"MySQL connection error: {e}")
@@ -29,17 +29,22 @@ def connect_to_db(host, user, password, database=None):
 
 def create_database(conn, db_name):
     cursor = conn.cursor()
-    cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name}")
-    conn.commit()
-    logging.info(f"Database '{db_name}' created or exists.")
-    cursor.close()
+    try:
+        cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{db_name}`")
+        conn.commit()
+        logging.info(f"Database '{db_name}' created or exists.")
+    finally:
+        cursor.close()
 
-def create_table(conn):
+def create_table(conn, drop_existing=True):
     cursor = conn.cursor()
     try:
-        cursor.execute("DROP TABLE IF EXISTS Global_Electronics_Master")
+        if drop_existing:
+            cursor.execute("DROP TABLE IF EXISTS Global_Electronics_Master")
+            logging.info("Dropped existing table Global_Electronics_Master.")
+
         cursor.execute("""
-        CREATE TABLE Global_Electronics_Master (
+        CREATE TABLE IF NOT EXISTS Global_Electronics_Master (
             Order_Number VARCHAR(255),
             Line_Item INT,
             Order_Date DATE,
@@ -70,30 +75,42 @@ def create_table(conn):
         );
         """)
         conn.commit()
-        logging.info("Table created successfully.")
+        logging.info("Created table Global_Electronics_Master.")
     finally:
         cursor.close()
 
 def insert_csv_to_mysql(conn, csv_path):
-    cursor = conn.cursor()
     df = pd.read_csv(csv_path)
-    for _, row in df.iterrows():
-        values = tuple(row.fillna(None))
-        placeholders = ','.join(['%s'] * len(values))
-        insert_query = f"""
-        INSERT INTO Global_Electronics_Master VALUES ({placeholders})
-        """
-        cursor.execute(insert_query, values)
-    conn.commit()
-    logging.info(f"{len(df)} rows inserted into table.")
-    cursor.close()
+    df = df.where(pd.notnull(df), None)  # Replace NaNs with None
+
+    cursor = conn.cursor()
+    try:
+        columns = df.columns.tolist()
+        col_str = ','.join(f"`{col}`" for col in columns)
+        placeholders = ','.join(['%s'] * len(columns))
+        query = f"INSERT INTO Global_Electronics_Master ({col_str}) VALUES ({placeholders})"
+
+        for _, row in df.iterrows():
+            values = tuple(row.values)
+            try:
+                cursor.execute(query, values)
+            except Exception as row_err:
+                logging.warning(f"Row insert failed: {row_err}")
+        conn.commit()
+        logging.info(f"Inserted {len(df)} rows into Global_Electronics_Master.")
+    except Exception as e:
+        logging.error(f"Bulk insert failed: {e}")
+        raise
+    finally:
+        cursor.close()
 
 def run_query(conn, query):
     cursor = conn.cursor(dictionary=True)
-    cursor.execute(query)
-    results = cursor.fetchall()
-    cursor.close()
-    return pd.DataFrame(results)
+    try:
+        cursor.execute(query)
+        return pd.DataFrame(cursor.fetchall())
+    finally:
+        cursor.close()
 
 def run_all_queries(conn):
     queries = {
@@ -103,7 +120,8 @@ def run_all_queries(conn):
         """,
         "Monthly Revenue Trend": """
             SELECT DATE_FORMAT(Order_Date, '%%Y-%%m') AS Month, ROUND(SUM(Revenue), 2) AS Monthly_Revenue
-            FROM Global_Electronics_Master GROUP BY Month ORDER BY Month;
+            FROM Global_Electronics_Master
+            GROUP BY Month ORDER BY Month;
         """,
         "Top Products by Quantity": """
             SELECT Product_ID, Product_Name, SUM(Quantity) AS Total_Quantity
@@ -163,28 +181,32 @@ def run_all_queries(conn):
     }
 
     for title, query in queries.items():
-        print(f"\n{title}")
+        logging.info(f"Running query: {title}")
         df = run_query(conn, query)
-        print(df)
+        print(f"\n--- {title} ---")
+        print(df.to_string(index=False))
 
-# -------------------- MAIN --------------------
+# -------------------- MAIN (CLI ENTRY POINT) --------------------
 if __name__ == "__main__":
     host = "localhost"
     user = "your_mysql_user"
     password = "your_mysql_password"
     database_name = "global_electronics"
-    csv_file = "output/Global_Electronics_Master.csv"  # change path as needed
+    csv_file = "output/Global_Electronics_Master.csv"  # adjust path as needed
 
-    # Step 1: Connect and setup database
-    conn = connect_to_db(host, user, password)
-    create_database(conn, database_name)
-    conn.close()
+    try:
+        # Step 1: Initial DB connection and creation
+        conn = connect_to_db(host, user, password)
+        create_database(conn, database_name)
+        conn.close()
 
-    # Step 2: Reconnect to the specific database
-    conn = connect_to_db(host, user, password, database_name)
-    create_table(conn)
-    insert_csv_to_mysql(conn, csv_file)
+        # Step 2: Reconnect to specific DB
+        conn = connect_to_db(host, user, password, database_name)
+        create_table(conn)
+        insert_csv_to_mysql(conn, csv_file)
 
-    # Step 3: Run queries
-    run_all_queries(conn)
-    conn.close()
+        # Step 3: Run analytics queries
+        run_all_queries(conn)
+    finally:
+        conn.close()
+        logging.info("MySQL connection closed.")

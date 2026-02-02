@@ -2,9 +2,8 @@ import mysql.connector as sql
 import logging
 import os
 
-# Setup logs
+# Setup logging
 os.makedirs("logs", exist_ok=True)
-
 logging.basicConfig(
     filename="logs/database.log",
     level=logging.INFO,
@@ -12,36 +11,38 @@ logging.basicConfig(
 )
 
 def connect_to_db(host, user, password, database=None):
-    print(f"Connecting to MySQL server... host={host}, user={user}, database={database}")
-    logging.info(f"Connecting to MySQL server with host={host}, user={user}, database={database}")
-
+    logging.info(f"Connecting to MySQL server at {host}, user={user}, database={database}")
     try:
-        mydb = sql.connect(
+        conn = sql.connect(
             host=host,
             user=user,
             password=password,
             database=database if database else None,
             use_pure=True
         )
-        print("MySQL connection successful.")
+        conn.ping(reconnect=True, attempts=3, delay=2)
         logging.info("MySQL connection successful.")
-        return mydb
+        return conn
     except Exception as e:
-        print(f"Failed to connect to MySQL: {e}")
-        logging.error(f"Failed to connect to MySQL: {e}")
+        logging.error(f"MySQL connection failed: {e}")
         raise
 
-def create_database(connection, database_name):
-    cursor = connection.cursor()
-    cursor.execute(f"CREATE DATABASE IF NOT EXISTS {database_name}")
-    cursor.close()
-    print(f"Database '{database_name}' created or verified.")
-    logging.info(f"Database '{database_name}' created or verified.")
-
-def create_tables(connection):
-    cursor = connection.cursor()
+def create_database(conn, database_name):
     try:
-        cursor.execute(""" 
+        cursor = conn.cursor()
+        cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
+        cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{database_name}`")
+        logging.info(f"Database '{database_name}' created or verified.")
+    except Exception as e:
+        logging.error(f"Failed to create database '{database_name}': {e}")
+        raise
+    finally:
+        cursor.close()
+
+def create_tables(conn):
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS Channel (
                 channel_id VARCHAR(255) PRIMARY KEY,
                 channel_name VARCHAR(255),
@@ -87,25 +88,22 @@ def create_tables(connection):
                 FOREIGN KEY (video_id) REFERENCES Video (video_id)
             );
         """)
-        connection.commit()
-        print("All tables created successfully.")
+        conn.commit()
         logging.info("All tables created successfully.")
     except Exception as e:
-        print(f"Table creation error: {e}")
-        logging.error(f"Table creation error: {e}")
+        logging.error(f"Error during table creation: {e}")
         raise
     finally:
         cursor.close()
 
-def insert_channel(connection, channel):
-    cursor = connection.cursor()
+def insert_channel(conn, channel):
     query = """
         INSERT INTO Channel (channel_id, channel_name, channel_type, channel_views, channel_description, channel_status)
         VALUES (%s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE 
-        channel_name = VALUES(channel_name), 
-        channel_views = VALUES(channel_views), 
-        channel_status = VALUES(channel_status);
+            channel_name = VALUES(channel_name),
+            channel_views = VALUES(channel_views),
+            channel_status = VALUES(channel_status);
     """
     values = (
         channel["channel_id"],
@@ -115,130 +113,103 @@ def insert_channel(connection, channel):
         channel["channel_description"],
         channel["channel_status"]
     )
-    try:
-        cursor.execute(query, values)
-        connection.commit()
-        print("Channel data inserted.")
-        logging.info("Channel data inserted.")
-    except Exception as e:
-        print(f"Failed to insert channel: {e}")
-        logging.error(f"Failed to insert channel: {e}")
-        raise
-    finally:
-        cursor.close()
+    _execute_single(conn, query, values, "channel")
 
-def insert_playlist(connection, playlist):
-    cursor = connection.cursor()
+def insert_playlist(conn, playlist):
     query = """
         INSERT INTO Playlist (playlist_id, channel_id, playlist_name)
         VALUES (%s, %s, %s)
         ON DUPLICATE KEY UPDATE 
-        playlist_name = VALUES(playlist_name);
+            playlist_name = VALUES(playlist_name);
     """
     values = (
         playlist["playlist_id"],
         playlist["channel_id"],
         playlist["playlist_name"]
     )
-    try:
-        cursor.execute(query, values)
-        connection.commit()
-        print("Playlist data inserted.")
-        logging.info("Playlist data inserted.")
-    except Exception as e:
-        print(f"Failed to insert playlist: {e}")
-        logging.error(f"Failed to insert playlist: {e}")
-        raise
-    finally:
-        cursor.close()
+    _execute_single(conn, query, values, "playlist")
 
-def insert_videos(connection, videos):
-    cursor = connection.cursor()
+def insert_videos(conn, videos):
     query = """
         INSERT INTO Video (video_id, playlist_id, video_name, video_description, published_date, 
-                           view_count, like_count, dislike_count, favorite_count, comment_count, duration, thumbnail, caption)
+                           view_count, like_count, dislike_count, favorite_count, comment_count,
+                           duration, thumbnail, caption)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE 
-        view_count = VALUES(view_count), 
-        like_count = VALUES(like_count), 
-        dislike_count = VALUES(dislike_count), 
-        comment_count = VALUES(comment_count);
+            view_count = VALUES(view_count),
+            like_count = VALUES(like_count),
+            dislike_count = VALUES(dislike_count),
+            comment_count = VALUES(comment_count);
     """
-    try:
-        for video in videos:
-            values = (
-                video["video_id"],
-                video["playlist_id"],
-                video["video_name"],
-                video["video_description"],
-                video["published_date"],
-                video["view_count"],
-                video["like_count"],
-                video["dislike_count"],
-                video["favorite_count"],
-                video["comment_count"],
-                video["duration"],
-                video["thumbnail"],
-                video["caption"]
-            )
-            cursor.execute(query, values)
-        connection.commit()
-        print("Video data inserted.")
-        logging.info("Video data inserted.")
-    except Exception as e:
-        print(f"Failed to insert videos: {e}")
-        logging.error(f"Failed to insert videos: {e}")
-        raise
-    finally:
-        cursor.close()
+    values_list = [
+        (
+            v["video_id"], v["playlist_id"], v["video_name"], v["video_description"], v["published_date"],
+            v["view_count"], v["like_count"], v["dislike_count"], v["favorite_count"],
+            v["comment_count"], v["duration"], v["thumbnail"], v["caption"]
+        ) for v in videos
+    ]
+    _execute_batch(conn, query, values_list, "videos")
 
-def insert_comments(connection, comments):
-    cursor = connection.cursor()
+def insert_comments(conn, comments):
     query = """
         INSERT INTO Comment (comment_id, video_id, comment_text, comment_author, comment_published_date)
         VALUES (%s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE 
-        comment_text = VALUES(comment_text);
+            comment_text = VALUES(comment_text);
     """
+    values_list = [
+        (
+            c["comment_id"], c["video_id"], c["comment_text"],
+            c["comment_author"], c["comment_published_date"]
+        ) for c in comments
+    ]
+    _execute_batch(conn, query, values_list, "comments")
+
+def _execute_single(conn, query, values, label):
+    cursor = conn.cursor()
     try:
-        for comment in comments:
-            values = (
-                comment["comment_id"],
-                comment["video_id"],
-                comment["comment_text"],
-                comment["comment_author"],
-                comment["comment_published_date"]
-            )
-            cursor.execute(query, values)
-        connection.commit()
-        print("Comment data inserted.")
-        logging.info("Comment data inserted.")
+        cursor.execute(query, values)
+        conn.commit()
+        logging.info(f"{label.capitalize()} data inserted.")
     except Exception as e:
-        print(f"Failed to insert comments: {e}")
-        logging.error(f"Failed to insert comments: {e}")
+        logging.error(f"Failed to insert {label}: {e}")
         raise
     finally:
         cursor.close()
 
-def execute_query(connection, query):
-    cursor = connection.cursor(dictionary=True)
+def _execute_batch(conn, query, values_list, label):
+    cursor = conn.cursor()
     try:
-        cursor.execute(query)
-        result = cursor.fetchall()
-        return result
+        cursor.executemany(query, values_list)
+        conn.commit()
+        logging.info(f"{label.capitalize()} batch inserted: {len(values_list)} rows.")
+    except Exception as e:
+        logging.error(f"Failed to insert {label} batch: {e}")
+        raise
     finally:
         cursor.close()
 
-def get_query_results(connection, query_type):
+def execute_query(conn, query):
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(query)
+        return cursor.fetchall()
+    except Exception as e:
+        logging.error(f"Query execution failed: {e}")
+        raise
+    finally:
+        cursor.close()
+
+def get_query_results(conn, query_type):
     queries = {
         "video_channel_names": """
-            SELECT Video.video_name AS video_name, Channel.channel_name AS channel_name
+            SELECT Video.video_name, Channel.channel_name
             FROM Video
             JOIN Playlist ON Video.playlist_id = Playlist.playlist_id
             JOIN Channel ON Playlist.channel_id = Channel.channel_id;
         """,
         "most_videos_channels": """
-            SELECT Channel.channel_name AS channel_name, COUNT(Video.video_id) AS video_count
+            SELECT Channel.channel_name, COUNT(Video.video_id) AS video_count
             FROM Video
             JOIN Playlist ON Video.playlist_id = Playlist.playlist_id
             JOIN Channel ON Playlist.channel_id = Channel.channel_id
@@ -247,7 +218,7 @@ def get_query_results(connection, query_type):
             LIMIT 1;
         """,
         "top_viewed_videos": """
-            SELECT Video.video_name AS video_name, Video.view_count AS view_count, Channel.channel_name AS channel_name
+            SELECT Video.video_name, Video.view_count, Channel.channel_name
             FROM Video
             JOIN Playlist ON Video.playlist_id = Playlist.playlist_id
             JOIN Channel ON Playlist.channel_id = Channel.channel_id
@@ -255,10 +226,10 @@ def get_query_results(connection, query_type):
             LIMIT 10;
         """,
         "video_comment_counts": """
-            SELECT Video.video_name AS video_name, Video.comment_count AS comment_count FROM Video;
+            SELECT video_name, comment_count FROM Video;
         """,
         "most_liked_videos": """
-            SELECT Video.video_name AS video_name, Video.like_count AS like_count, Channel.channel_name AS channel_name
+            SELECT Video.video_name, Video.like_count, Channel.channel_name
             FROM Video
             JOIN Playlist ON Video.playlist_id = Playlist.playlist_id
             JOIN Channel ON Playlist.channel_id = Channel.channel_id
@@ -266,28 +237,27 @@ def get_query_results(connection, query_type):
             LIMIT 10;
         """,
         "video_likes_dislikes": """
-            SELECT Video.video_name AS video_name, Video.like_count AS like_count, Video.dislike_count AS dislike_count
-            FROM Video;
+            SELECT video_name, like_count, dislike_count FROM Video;
         """,
         "channel_total_views": """
-            SELECT Channel.channel_name AS channel_name, Channel.channel_views AS total_views FROM Channel;
+            SELECT channel_name, channel_views AS total_views FROM Channel;
         """,
         "channels_published_2022": """
-            SELECT DISTINCT Channel.channel_name AS channel_name
+            SELECT DISTINCT Channel.channel_name
             FROM Video
             JOIN Playlist ON Video.playlist_id = Playlist.playlist_id
             JOIN Channel ON Playlist.channel_id = Channel.channel_id
             WHERE YEAR(Video.published_date) = 2022;
         """,
         "average_video_duration": """
-            SELECT Channel.channel_name AS channel_name, AVG(Video.duration) / 60 AS avg_duration_minutes
+            SELECT Channel.channel_name, ROUND(AVG(Video.duration) / 60, 2) AS avg_duration_minutes
             FROM Video
             JOIN Playlist ON Video.playlist_id = Playlist.playlist_id
             JOIN Channel ON Playlist.channel_id = Channel.channel_id
             GROUP BY Channel.channel_name;
         """,
         "most_commented_videos": """
-            SELECT Video.video_name AS video_name, Video.comment_count AS comment_count, Channel.channel_name AS channel_name
+            SELECT Video.video_name, Video.comment_count, Channel.channel_name
             FROM Video
             JOIN Playlist ON Video.playlist_id = Playlist.playlist_id
             JOIN Channel ON Playlist.channel_id = Channel.channel_id
@@ -296,8 +266,10 @@ def get_query_results(connection, query_type):
         """
     }
 
-    query = queries.get(query_type, "")
+    query = queries.get(query_type)
     if not query:
+        logging.error(f"Invalid query type requested: {query_type}")
         raise ValueError(f"Invalid query type: {query_type}")
-    
-    return execute_query(connection, query)
+
+    logging.info(f"Executing query: {query_type}")
+    return execute_query(conn, query)
