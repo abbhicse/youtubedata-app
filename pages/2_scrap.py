@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from data_processing import transform_channel_data
-from fetch import dict_to_dataframe, fetch_channel_data
+from fetch import fetch_channel_data
 from database import insert_channel, insert_playlist, insert_videos, insert_comments
 
 # Page title
@@ -25,7 +25,6 @@ st.success("YouTube API and database connection are ready.")
 # User input for channel ID
 channel_id = st.text_input("Enter YouTube Channel ID")
 
-# Define main logic
 def fetch_and_store_data(youtube, conn, channel_id):
     try:
         st.info("Fetching channel data...")
@@ -38,12 +37,30 @@ def fetch_and_store_data(youtube, conn, channel_id):
         # Transform and clean data
         cleaned_data = transform_channel_data(channel_data)
 
+        # Debug counts (very important)
+        st.write("Total Playlists:", len(cleaned_data["playlists"]))
+        st.write("Total Videos:", len(cleaned_data["videos"]))
+        st.write("Total Comments:", len(cleaned_data["comments"]))
+
+        if not cleaned_data["videos"]:
+            st.warning("No videos were extracted. Queries will return empty results.")
+            return
+
         # Insert into database
         insert_channel(conn, cleaned_data["channel"])
+
         for playlist in cleaned_data["playlists"]:
             insert_playlist(conn, playlist)
+
         insert_videos(conn, cleaned_data["videos"])
         insert_comments(conn, cleaned_data["comments"])
+
+        # REQUIRED for SQLite persistence
+        conn.commit()
+
+        # Verify insert (debug safety)
+        video_check = pd.read_sql("SELECT COUNT(*) AS total FROM Video", conn)
+        st.write("Videos currently in DB:", video_check["total"].iloc[0])
 
         st.success("Data fetched and stored successfully. You can now proceed to querying.")
 
