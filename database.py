@@ -1,4 +1,5 @@
 import mysql.connector as sql
+import streamlit as st
 import logging
 import os
 
@@ -10,14 +11,16 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 
-def connect_to_db(host, user, password, database=None):
-    logging.info(f"Connecting to MySQL server at {host}, user={user}, database={database}")
+# Read credentials from Streamlit Secrets
+def connect_to_db():
+    logging.info("Connecting to PlanetScale MySQL")
     try:
         conn = sql.connect(
-            host=host,
-            user=user,
-            password=password,
-            database=database if database else None,
+            host=st.secrets["DB_HOST"],
+            user=st.secrets["DB_USER"],
+            password=st.secrets["DB_PASSWORD"],
+            database=st.secrets["DB_NAME"],
+            ssl_verify_cert=True,  # Required by PlanetScale
             use_pure=True
         )
         conn.ping(reconnect=True, attempts=3, delay=2)
@@ -26,18 +29,6 @@ def connect_to_db(host, user, password, database=None):
     except Exception as e:
         logging.error(f"MySQL connection failed: {e}")
         raise
-
-def create_database(conn, database_name):
-    try:
-        cursor = conn.cursor()
-        cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
-        cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{database_name}`")
-        logging.info(f"Database '{database_name}' created or verified.")
-    except Exception as e:
-        logging.error(f"Failed to create database '{database_name}': {e}")
-        raise
-    finally:
-        cursor.close()
 
 def create_tables(conn):
     cursor = conn.cursor()
@@ -56,8 +47,8 @@ def create_tables(conn):
             CREATE TABLE IF NOT EXISTS Playlist (
                 playlist_id VARCHAR(255) PRIMARY KEY,
                 channel_id VARCHAR(255),
-                playlist_name VARCHAR(255),
-                FOREIGN KEY (channel_id) REFERENCES Channel (channel_id)
+                playlist_name VARCHAR(255)
+                -- FOREIGN KEY removed for PlanetScale
             );
         """)
         cursor.execute("""
@@ -74,8 +65,8 @@ def create_tables(conn):
                 comment_count INT,
                 duration INT,
                 thumbnail VARCHAR(255),
-                caption VARCHAR(255),
-                FOREIGN KEY (playlist_id) REFERENCES Playlist (playlist_id)
+                caption VARCHAR(255)
+                -- FOREIGN KEY removed for PlanetScale
             );
         """)
         cursor.execute("""
@@ -84,8 +75,8 @@ def create_tables(conn):
                 video_id VARCHAR(255),
                 comment_text TEXT,
                 comment_author VARCHAR(255),
-                comment_published_date DATETIME,
-                FOREIGN KEY (video_id) REFERENCES Video (video_id)
+                comment_published_date DATETIME
+                -- FOREIGN KEY removed for PlanetScale
             );
         """)
         conn.commit()
