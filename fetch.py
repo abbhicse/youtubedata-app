@@ -15,12 +15,13 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 
+
 def initialize_youtube_api(api_key):
     logging.info("Initializing YouTube API client")
     return googleapiclient.discovery.build("youtube", "v3", developerKey=api_key)
 
 
-def fetch_channel_data(youtube, channel_id):
+def fetch_channel_data(youtube, channel_id, max_video_pages=2, max_comment_pages=2):
     logging.info(f"Fetching channel data for ID: {channel_id}")
     try:
         response = youtube.channels().list(
@@ -47,15 +48,16 @@ def fetch_channel_data(youtube, channel_id):
         }
 
         logging.info("Fetching playlists...")
-        channel_data["Playlists"] = fetch_playlists(youtube, channel_id)
-        channel_data["Playlists"].append({
+        playlists = fetch_playlists(youtube, channel_id)
+        playlists.append({
             "Playlist_Id": uploads_playlist_id,
             "Channel_Id": info["id"],
             "Playlist_Name": "Uploads"
         })
+        channel_data["Playlists"] = playlists
 
         logging.info("Fetching videos...")
-        videos = fetch_videos(youtube, uploads_playlist_id)
+        videos = fetch_videos(youtube, uploads_playlist_id, max_pages=max_video_pages, comment_pages=max_comment_pages)
         for video_id, video_details in videos.items():
             channel_data[video_id] = video_details
 
@@ -97,7 +99,7 @@ def fetch_playlists(youtube, channel_id, max_pages=5):
     return playlists
 
 
-def fetch_videos(youtube, playlist_id, max_pages=5):
+def fetch_videos(youtube, playlist_id, max_pages=5, comment_pages=2):
     videos = {}
     try:
         request = youtube.playlistItems().list(
@@ -112,7 +114,7 @@ def fetch_videos(youtube, playlist_id, max_pages=5):
             logging.info(f"Fetching videos page {page_count + 1}")
             for item in response.get("items", []):
                 video_id = item["snippet"]["resourceId"]["videoId"]
-                videos[video_id] = fetch_video_details(youtube, video_id)
+                videos[video_id] = fetch_video_details(youtube, video_id, comment_pages)
             request = youtube.playlistItems().list_next(request, response)
             page_count += 1
 
@@ -122,7 +124,7 @@ def fetch_videos(youtube, playlist_id, max_pages=5):
     return videos
 
 
-def fetch_video_details(youtube, video_id):
+def fetch_video_details(youtube, video_id, comment_pages=2):
     try:
         response = youtube.videos().list(
             part="snippet,statistics,contentDetails",
@@ -134,6 +136,8 @@ def fetch_video_details(youtube, video_id):
             return {}
 
         video = response["items"][0]
+        thumbnail_url = video["snippet"]["thumbnails"].get("high", {}).get("url", "")
+
         data = {
             "Video_Id": video["id"],
             "Video_Name": video["snippet"]["title"],
@@ -142,13 +146,13 @@ def fetch_video_details(youtube, video_id):
             "PublishedAt": video["snippet"]["publishedAt"],
             "View_Count": int(video["statistics"].get("viewCount", 0)),
             "Like_Count": int(video["statistics"].get("likeCount", 0)),
-            "Dislike_Count": int(video["statistics"].get("dislikeCount", 0)),
+            "Dislike_Count": int(video["statistics"].get("dislikeCount", 0) or 0),
             "Favorite_Count": int(video["statistics"].get("favoriteCount", 0)),
             "Comment_Count": int(video["statistics"].get("commentCount", 0)),
             "Duration": video["contentDetails"]["duration"],
-            "Thumbnail": video["snippet"]["thumbnails"]["high"]["url"],
+            "Thumbnail": thumbnail_url,
             "Caption_Status": "Available" if video["contentDetails"].get("caption") == "true" else "Not Available",
-            "Comments": fetch_video_comments(youtube, video_id)
+            "Comments": fetch_video_comments(youtube, video_id, max_pages=comment_pages)
         }
 
         return data

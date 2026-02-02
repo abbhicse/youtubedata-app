@@ -9,7 +9,7 @@ st.title("Fetch and Store YouTube Data")
 
 # Retrieve session state variables
 youtube = st.session_state.get("youtube_api")
-conn = st.session_state.get("conn")  # Use 'conn' to match Initialization page
+conn = st.session_state.get("conn")
 
 # Validate initialization
 if not youtube:
@@ -44,7 +44,6 @@ def fetch_and_store_data(youtube, conn, channel_id):
             insert_playlist(conn, playlist)
         insert_videos(conn, cleaned_data["videos"])
         insert_comments(conn, cleaned_data["comments"])
-        conn.commit()
 
         st.success("Data fetched and stored successfully. You can now proceed to querying.")
 
@@ -69,4 +68,5 @@ if st.button("Fetch and Store Data"):
     if not channel_id.strip():
         st.warning("Please enter a valid YouTube Channel ID.")
     else:
-        fetch_and_store_data(youtube, conn, channel_id)
+        with st.spinner("Processing..."):
+            fetch_and_store_data(youtube, conn, channel_id)

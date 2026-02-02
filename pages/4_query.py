@@ -25,22 +25,33 @@ query_options = {
     "Which videos have the highest number of comments, and what are their channels?": "most_commented_videos"
 }
 
-# User selects a query
+# Query selector
 query_label = st.selectbox("Select a query to execute", list(query_options.keys()))
 query_type = query_options[query_label]
 
-# Button to run query
+# Execute on click
 if st.button("Run Query"):
-    try:
-        results = get_query_results(conn, query_type)
+    with st.spinner("Running the selected query..."):
+        try:
+            results = get_query_results(conn, query_type)
 
-        st.subheader(f"Results for: {query_label}")
-        
-        # Convert to DataFrame if it's a list of dicts
-        if results:
-            df = pd.DataFrame(results)
-            st.dataframe(df)
-        else:
-            st.info("No results found.")
-    except Exception as e:
-        st.error(f"An error occurred while executing the query: {e}")
+            st.subheader(f"Results for: {query_label}")
+
+            if results:
+                df = pd.DataFrame(results)
+                st.write(f"Total rows returned: {len(df)}")
+                st.dataframe(df)
+
+                # CSV export
+                csv = df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="Download results as CSV",
+                    data=csv,
+                    file_name=f"{query_type}_results.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("No results found.")
+
+        except Exception as e:
+            st.error(f"An error occurred while executing the query: {e}")

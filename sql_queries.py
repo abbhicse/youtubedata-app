@@ -1,40 +1,24 @@
-import mysql.connector as sql
+import sqlite3
 import pandas as pd
 import logging
 import os
 
-# -------------------- SETUP --------------------
+# Setup logging
 os.makedirs("logs", exist_ok=True)
-
 logging.basicConfig(
     filename="logs/database.log",
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 
-def connect_to_db(host, user, password, database=None):
+def connect_to_db(db_file="global_electronics.db"):
     try:
-        conn = sql.connect(
-            host=host,
-            user=user,
-            password=password,
-            database=database,
-            use_pure=True
-        )
-        logging.info(f"Connected to MySQL server at {host}, database={database or 'None'}")
+        conn = sqlite3.connect(db_file)
+        logging.info(f"Connected to SQLite DB at {db_file}")
         return conn
     except Exception as e:
-        logging.error(f"MySQL connection error: {e}")
+        logging.error(f"SQLite connection error: {e}")
         raise
-
-def create_database(conn, db_name):
-    cursor = conn.cursor()
-    try:
-        cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{db_name}`")
-        conn.commit()
-        logging.info(f"Database '{db_name}' created or exists.")
-    finally:
-        cursor.close()
 
 def create_table(conn, drop_existing=True):
     cursor = conn.cursor()
@@ -45,33 +29,33 @@ def create_table(conn, drop_existing=True):
 
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS Global_Electronics_Master (
-            Order_Number VARCHAR(255),
-            Line_Item INT,
-            Order_Date DATE,
-            Delivery_Date DATE,
-            Customer_ID VARCHAR(255),
-            Store_ID VARCHAR(255),
-            Product_ID VARCHAR(255),
-            Currency VARCHAR(10),
-            Quantity INT,
-            Unit_Cost FLOAT,
-            Unit_Price FLOAT,
-            Customer_Name VARCHAR(255),
-            Gender VARCHAR(10),
-            Birthday DATE,
-            DOB DATE,
-            Age INT,
-            Product_Name VARCHAR(255),
-            Category VARCHAR(100),
-            Sub_Category VARCHAR(100),
-            Store_Name VARCHAR(255),
-            Store_Location VARCHAR(255),
-            Store_Size FLOAT,
-            Open_Date DATE,
-            Exchange_Rate FLOAT,
-            Revenue FLOAT,
-            Cost FLOAT,
-            Profit FLOAT
+            Order_Number TEXT,
+            Line_Item INTEGER,
+            Order_Date TEXT,
+            Delivery_Date TEXT,
+            Customer_ID TEXT,
+            Store_ID TEXT,
+            Product_ID TEXT,
+            Currency TEXT,
+            Quantity INTEGER,
+            Unit_Cost REAL,
+            Unit_Price REAL,
+            Customer_Name TEXT,
+            Gender TEXT,
+            Birthday TEXT,
+            DOB TEXT,
+            Age INTEGER,
+            Product_Name TEXT,
+            Category TEXT,
+            Sub_Category TEXT,
+            Store_Name TEXT,
+            Store_Location TEXT,
+            Store_Size REAL,
+            Open_Date TEXT,
+            Exchange_Rate REAL,
+            Revenue REAL,
+            Cost REAL,
+            Profit REAL
         );
         """)
         conn.commit()
@@ -79,38 +63,19 @@ def create_table(conn, drop_existing=True):
     finally:
         cursor.close()
 
-def insert_csv_to_mysql(conn, csv_path):
+def insert_csv_to_sqlite(conn, csv_path):
     df = pd.read_csv(csv_path)
-    df = df.where(pd.notnull(df), None)  # Replace NaNs with None
+    df = df.where(pd.notnull(df), None)
 
-    cursor = conn.cursor()
     try:
-        columns = df.columns.tolist()
-        col_str = ','.join(f"`{col}`" for col in columns)
-        placeholders = ','.join(['%s'] * len(columns))
-        query = f"INSERT INTO Global_Electronics_Master ({col_str}) VALUES ({placeholders})"
-
-        for _, row in df.iterrows():
-            values = tuple(row.values)
-            try:
-                cursor.execute(query, values)
-            except Exception as row_err:
-                logging.warning(f"Row insert failed: {row_err}")
-        conn.commit()
+        df.to_sql("Global_Electronics_Master", conn, if_exists="append", index=False)
         logging.info(f"Inserted {len(df)} rows into Global_Electronics_Master.")
     except Exception as e:
-        logging.error(f"Bulk insert failed: {e}")
+        logging.error(f"Data insert failed: {e}")
         raise
-    finally:
-        cursor.close()
 
 def run_query(conn, query):
-    cursor = conn.cursor(dictionary=True)
-    try:
-        cursor.execute(query)
-        return pd.DataFrame(cursor.fetchall())
-    finally:
-        cursor.close()
+    return pd.read_sql_query(query, conn)
 
 def run_all_queries(conn):
     queries = {
@@ -119,7 +84,7 @@ def run_all_queries(conn):
             FROM Global_Electronics_Master;
         """,
         "Monthly Revenue Trend": """
-            SELECT DATE_FORMAT(Order_Date, '%%Y-%%m') AS Month, ROUND(SUM(Revenue), 2) AS Monthly_Revenue
+            SELECT substr(Order_Date, 1, 7) AS Month, ROUND(SUM(Revenue), 2) AS Monthly_Revenue
             FROM Global_Electronics_Master
             GROUP BY Month ORDER BY Month;
         """,
@@ -167,7 +132,7 @@ def run_all_queries(conn):
         """,
         "Average Order Value per Customer": """
             SELECT Customer_ID, Customer_Name,
-                ROUND(SUM(Revenue)/COUNT(DISTINCT Order_Number), 2) AS Avg_Order_Value
+                ROUND(SUM(Revenue)*1.0 / COUNT(DISTINCT Order_Number), 2) AS Avg_Order_Value
             FROM Global_Electronics_Master
             GROUP BY Customer_ID, Customer_Name
             ORDER BY Avg_Order_Value DESC LIMIT 10;
@@ -186,27 +151,16 @@ def run_all_queries(conn):
         print(f"\n--- {title} ---")
         print(df.to_string(index=False))
 
-# -------------------- MAIN (CLI ENTRY POINT) --------------------
+# -------------------- MAIN ENTRY (for CLI usage) --------------------
 if __name__ == "__main__":
-    host = "localhost"
-    user = "your_mysql_user"
-    password = "your_mysql_password"
-    database_name = "global_electronics"
-    csv_file = "output/Global_Electronics_Master.csv"  # adjust path as needed
+    db_file = "global_electronics.db"
+    csv_file = "output/Global_Electronics_Master.csv"  # Adjust path if needed
 
     try:
-        # Step 1: Initial DB connection and creation
-        conn = connect_to_db(host, user, password)
-        create_database(conn, database_name)
-        conn.close()
-
-        # Step 2: Reconnect to specific DB
-        conn = connect_to_db(host, user, password, database_name)
+        conn = connect_to_db(db_file)
         create_table(conn)
-        insert_csv_to_mysql(conn, csv_file)
-
-        # Step 3: Run analytics queries
+        insert_csv_to_sqlite(conn, csv_file)
         run_all_queries(conn)
     finally:
         conn.close()
-        logging.info("MySQL connection closed.")
+        logging.info("SQLite connection closed.")

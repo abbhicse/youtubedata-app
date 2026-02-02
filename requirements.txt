@@ -1,7 +1,6 @@
 streamlit
 streamlit-option-menu
 google-api-python-client
-mysql-connector-python
 pandas
 python-dotenv
 isodate
