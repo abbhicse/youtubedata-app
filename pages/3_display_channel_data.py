@@ -24,13 +24,6 @@ channel_options = {f"{c['channel_name']} ({c['channel_id']})": c["channel_id"] f
 selected_display = st.selectbox("Select a Channel to Display:", list(channel_options.keys()))
 selected_channel_id = channel_options[selected_display]
 
-# Filters
-st.markdown("### Optional Filters")
-min_views = st.slider("Minimum video views", 0, 1_000_000, 0, step=1000)
-min_duration = st.slider("Minimum duration (minutes)", 0, 120, 0, step=1)
-date_filter = st.date_input("Show videos published after", None)
-title_search = st.text_input("Search for video title (contains):")
-
 # Display utility function
 def display_query_result(title, query, params=None, allow_download=True):
     try:
@@ -62,47 +55,28 @@ results_for_zip = {}
 if st.button("Display"):
     with st.spinner("Fetching stored data from the database..."):
 
-        # Channel
+        # Channel Info
         df_channel = display_query_result("Channel Info", """
             SELECT * FROM Channel WHERE channel_id = ?
         """, (selected_channel_id,))
         results_for_zip["channel_info.csv"] = df_channel
 
-        # Playlist
+        # Playlists
         df_playlist = display_query_result("Playlists", """
             SELECT * FROM Playlist WHERE channel_id = ?
         """, (selected_channel_id,))
         results_for_zip["playlists.csv"] = df_playlist
 
-        # Video query with filters
-        video_query = """
+        # Videos (no filters)
+        df_videos = display_query_result("Videos", """
             SELECT * FROM Video
             WHERE playlist_id IN (
                 SELECT playlist_id FROM Playlist WHERE channel_id = ?
             )
-        """
-        video_params = [selected_channel_id]
-
-        if min_views > 0:
-            video_query += " AND view_count >= ?"
-            video_params.append(min_views)
-
-        if min_duration > 0:
-            video_query += " AND duration >= ?"
-            video_params.append(min_duration * 60)  # Convert minutes to seconds
-
-        if date_filter:
-            video_query += " AND DATE(published_date) >= ?"
-            video_params.append(date_filter.isoformat())
-
-        if title_search.strip():
-            video_query += " AND video_name LIKE ?"
-            video_params.append(f"%{title_search.strip()}%")
-
-        df_videos = display_query_result("Videos", video_query, tuple(video_params))
+        """, (selected_channel_id,))
         results_for_zip["videos.csv"] = df_videos
 
-        # Comments
+        # Comments (limited)
         df_comments = display_query_result("Comments (limited to 100)", """
             SELECT * FROM Comment
             WHERE video_id IN (

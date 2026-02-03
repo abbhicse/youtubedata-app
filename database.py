@@ -1,29 +1,29 @@
-import sqlite3
+import sqlite3 as sql
 import logging
 import os
 
-# Setup logging
+# Setup logs
 os.makedirs("logs", exist_ok=True)
+
 logging.basicConfig(
     filename="logs/database.log",
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 
-DB_PATH = "youtube_data.db"
-
-# ---------- CONNECTION ----------
-def connect_to_db():
+def connect_to_db(db_path="youtube_data.db"):
     try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        logging.info("SQLite connection successful.")
+        conn = sql.connect(db_path, detect_types=sql.PARSE_DECLTYPES | sql.PARSE_COLNAMES)
+        conn.row_factory = sql.Row  # For dict-like access
+        logging.info("✅ SQLite connection successful.")
         return conn
     except Exception as e:
-        logging.error(f"SQLite connection failed: {e}")
+        logging.error(f"❌ Failed to connect to SQLite: {e}")
         raise
 
-# ---------- TABLE CREATION ----------
+def create_database(conn, db_name):
+    logging.info("SQLite uses file-based DB. No explicit CREATE DATABASE needed.")
+
 def create_tables(conn):
     cursor = conn.cursor()
     try:
@@ -37,15 +37,14 @@ def create_tables(conn):
                 channel_status TEXT
             );
         """)
-
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS Playlist (
                 playlist_id TEXT PRIMARY KEY,
                 channel_id TEXT,
-                playlist_name TEXT
+                playlist_name TEXT,
+                FOREIGN KEY (channel_id) REFERENCES Channel (channel_id)
             );
         """)
-
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS Video (
                 video_id TEXT PRIMARY KEY,
@@ -60,36 +59,31 @@ def create_tables(conn):
                 comment_count INTEGER,
                 duration INTEGER,
                 thumbnail TEXT,
-                caption TEXT
+                caption TEXT,
+                FOREIGN KEY (playlist_id) REFERENCES Playlist (playlist_id)
             );
         """)
-
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS Comment (
                 comment_id TEXT PRIMARY KEY,
                 video_id TEXT,
                 comment_text TEXT,
                 comment_author TEXT,
-                comment_published_date TEXT
+                comment_published_date TEXT,
+                FOREIGN KEY (video_id) REFERENCES Video (video_id)
             );
         """)
-
         conn.commit()
-        logging.info("All SQLite tables created successfully.")
-    except Exception as e:
-        logging.error(f"Table creation failed: {e}")
-        raise
+        logging.info("✅ Tables created successfully.")
     finally:
         cursor.close()
 
-# ---------- INSERT FUNCTIONS ----------
 def insert_channel(conn, channel):
+    cursor = conn.cursor()
     query = """
-        INSERT INTO Channel VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(channel_id) DO UPDATE SET
-            channel_name = excluded.channel_name,
-            channel_views = excluded.channel_views,
-            channel_status = excluded.channel_status;
+        INSERT OR REPLACE INTO Channel (
+            channel_id, channel_name, channel_type, channel_views, channel_description, channel_status
+        ) VALUES (?, ?, ?, ?, ?, ?)
     """
     values = (
         channel["channel_id"],
@@ -99,101 +93,92 @@ def insert_channel(conn, channel):
         channel["channel_description"],
         channel["channel_status"]
     )
-    _execute_single(conn, query, values, "channel")
+    cursor.execute(query, values)
+    conn.commit()
+    cursor.close()
 
 def insert_playlist(conn, playlist):
+    cursor = conn.cursor()
     query = """
-        INSERT INTO Playlist VALUES (?, ?, ?)
-        ON CONFLICT(playlist_id) DO UPDATE SET
-            playlist_name = excluded.playlist_name;
+        INSERT OR REPLACE INTO Playlist (playlist_id, channel_id, playlist_name)
+        VALUES (?, ?, ?)
     """
     values = (
         playlist["playlist_id"],
         playlist["channel_id"],
         playlist["playlist_name"]
     )
-    _execute_single(conn, query, values, "playlist")
+    cursor.execute(query, values)
+    conn.commit()
+    cursor.close()
 
 def insert_videos(conn, videos):
+    cursor = conn.cursor()
     query = """
-        INSERT INTO Video VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(video_id) DO UPDATE SET
-            view_count = excluded.view_count,
-            like_count = excluded.like_count,
-            dislike_count = excluded.dislike_count,
-            comment_count = excluded.comment_count;
+        INSERT OR REPLACE INTO Video (
+            video_id, playlist_id, video_name, video_description, published_date,
+            view_count, like_count, dislike_count, favorite_count, comment_count,
+            duration, thumbnail, caption
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
-    values_list = [
-        (
-            v["video_id"], v["playlist_id"], v["video_name"], v["video_description"],
-            v["published_date"], v["view_count"], v["like_count"], v["dislike_count"],
-            v["favorite_count"], v["comment_count"], v["duration"],
-            v["thumbnail"], v["caption"]
-        ) for v in videos
-    ]
-    _execute_batch(conn, query, values_list, "videos")
+    for video in videos:
+        values = (
+            video["video_id"],
+            video["playlist_id"],
+            video["video_name"],
+            video["video_description"],
+            str(video["published_date"]),
+            video["view_count"],
+            video["like_count"],
+            video["dislike_count"],
+            video["favorite_count"],
+            video["comment_count"],
+            video["duration"],
+            video["thumbnail"],
+            video["caption"]
+        )
+        cursor.execute(query, values)
+    conn.commit()
+    cursor.close()
 
 def insert_comments(conn, comments):
+    cursor = conn.cursor()
     query = """
-        INSERT INTO Comment VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(comment_id) DO UPDATE SET
-            comment_text = excluded.comment_text;
+        INSERT OR REPLACE INTO Comment (
+            comment_id, video_id, comment_text, comment_author, comment_published_date
+        ) VALUES (?, ?, ?, ?, ?)
     """
-    values_list = [
-        (
-            c["comment_id"], c["video_id"], c["comment_text"],
-            c["comment_author"], c["comment_published_date"]
-        ) for c in comments
-    ]
-    _execute_batch(conn, query, values_list, "comments")
-
-# ---------- HELPERS ----------
-def _execute_single(conn, query, values, label):
-    cursor = conn.cursor()
-    try:
+    for comment in comments:
+        values = (
+            comment["comment_id"],
+            comment["video_id"],
+            comment["comment_text"],
+            comment["comment_author"],
+            str(comment["comment_published_date"])
+        )
         cursor.execute(query, values)
-        conn.commit()
-        logging.info(f"{label.capitalize()} inserted.")
-    except Exception as e:
-        logging.error(f"Insert {label} failed: {e}")
-        raise
-    finally:
-        cursor.close()
+    conn.commit()
+    cursor.close()
 
-def _execute_batch(conn, query, values_list, label):
+def execute_query(conn, query, params=()):
     cursor = conn.cursor()
     try:
-        cursor.executemany(query, values_list)
-        conn.commit()
-        logging.info(f"{label.capitalize()} batch inserted: {len(values_list)} rows.")
-    except Exception as e:
-        logging.error(f"Batch insert {label} failed: {e}")
-        raise
-    finally:
-        cursor.close()
-
-# ---------- QUERY EXECUTION ----------
-def execute_query(conn, query):
-    cursor = conn.cursor()
-    try:
-        cursor.execute(query)
-        return [dict(row) for row in cursor.fetchall()]
-    except Exception as e:
-        logging.error(f"Query failed: {e}")
-        raise
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
     finally:
         cursor.close()
 
 def get_query_results(conn, query_type):
     queries = {
         "video_channel_names": """
-            SELECT Video.video_name, Channel.channel_name
+            SELECT Video.video_name AS video_name, Channel.channel_name AS channel_name
             FROM Video
             JOIN Playlist ON Video.playlist_id = Playlist.playlist_id
             JOIN Channel ON Playlist.channel_id = Channel.channel_id;
         """,
         "most_videos_channels": """
-            SELECT Channel.channel_name, COUNT(Video.video_id) AS video_count
+            SELECT Channel.channel_name AS channel_name, COUNT(Video.video_id) AS video_count
             FROM Video
             JOIN Playlist ON Video.playlist_id = Playlist.playlist_id
             JOIN Channel ON Playlist.channel_id = Channel.channel_id
@@ -209,16 +194,49 @@ def get_query_results(conn, query_type):
             ORDER BY Video.view_count DESC
             LIMIT 10;
         """,
+        "video_comment_counts": """
+            SELECT video_name, comment_count FROM Video;
+        """,
+        "most_liked_videos": """
+            SELECT Video.video_name, Video.like_count, Channel.channel_name
+            FROM Video
+            JOIN Playlist ON Video.playlist_id = Playlist.playlist_id
+            JOIN Channel ON Playlist.channel_id = Channel.channel_id
+            ORDER BY like_count DESC
+            LIMIT 10;
+        """,
+        "video_likes_dislikes": """
+            SELECT video_name, like_count, dislike_count FROM Video;
+        """,
+        "channel_total_views": """
+            SELECT channel_name, channel_views AS total_views FROM Channel;
+        """,
         "channels_published_2022": """
             SELECT DISTINCT Channel.channel_name
             FROM Video
             JOIN Playlist ON Video.playlist_id = Playlist.playlist_id
             JOIN Channel ON Playlist.channel_id = Channel.channel_id
-            WHERE substr(Video.published_date, 1, 4) = '2022';
+            WHERE strftime('%Y', published_date) = '2022';
+        """,
+        "average_video_duration": """
+            SELECT Channel.channel_name, ROUND(AVG(Video.duration)/60, 2) AS avg_duration_minutes
+            FROM Video
+            JOIN Playlist ON Video.playlist_id = Playlist.playlist_id
+            JOIN Channel ON Playlist.channel_id = Channel.channel_id
+            GROUP BY Channel.channel_name;
+        """,
+        "most_commented_videos": """
+            SELECT Video.video_name, Video.comment_count, Channel.channel_name
+            FROM Video
+            JOIN Playlist ON Video.playlist_id = Playlist.playlist_id
+            JOIN Channel ON Playlist.channel_id = Channel.channel_id
+            ORDER BY comment_count DESC
+            LIMIT 10;
         """
     }
 
-    if query_type not in queries:
-        raise ValueError("Invalid query type")
+    query = queries.get(query_type, "")
+    if not query:
+        raise ValueError(f"Invalid query type: {query_type}")
 
-    return execute_query(conn, queries[query_type])
+    return execute_query(conn, query)
