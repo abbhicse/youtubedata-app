@@ -49,6 +49,8 @@ def transform_channel_data(raw_data):
     videos = []
     comments = []
 
+    uploads_playlist_id = channel_meta.get("Playlist_Id", "uploads_default")  # fallback
+
     for key, value in raw_data.items():
         if key == "Playlists" or value == channel_meta:
             continue
@@ -58,9 +60,9 @@ def transform_channel_data(raw_data):
             published_str = value.get("PublishedAt", "").replace("Z", "")
             published_dt = datetime.strptime(published_str, "%Y-%m-%dT%H:%M:%S")
 
-            playlist_id = value.get("Playlist_Id")
+            # Hybrid logic: fallback to channel_meta Playlist_Id if missing
+            playlist_id = value.get("Playlist_Id") or uploads_playlist_id
             if not playlist_id or playlist_id == "uncategorized":
-                # Extra safety to ignore orphaned videos
                 warnings.warn(f"Video {video_id} has no playlist. Skipping.")
                 continue
 

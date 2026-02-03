@@ -116,7 +116,7 @@ def fetch_videos(youtube, playlist_id, max_pages=5, comment_pages=2):
                 video_id = item["snippet"]["resourceId"]["videoId"]
                 video_data = fetch_video_details(youtube, video_id, comment_pages)
                 if video_data:
-                    video_data["Playlist_Id"] = playlist_id  # ✅ FIX: Attach playlist ID here
+                    video_data["Playlist_Id"] = playlist_id  
                     videos[video_id] = video_data
             request = youtube.playlistItems().list_next(request, response)
             page_count += 1
