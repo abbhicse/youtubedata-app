@@ -14,7 +14,7 @@ logging.basicConfig(
 
 def connect_to_db(db_path="youtube_data.db"):
     try:
-        conn = sql.connect(db_path, detect_types=sql.PARSE_DECLTYPES | sql.PARSE_COLNAMES)
+        conn = sql.connect(db_path, detect_types=sql.PARSE_DECLTYPES | sql.PARSE_COLNAMES, check_same_thread=False)
         conn.row_factory = sql.Row  # For dict-like access
         logging.info("✅ SQLite connection successful.")
         return conn
