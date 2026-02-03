@@ -2,6 +2,7 @@ import sqlite3 as sql
 import logging
 import os
 
+print("LOADED DATABASE.PY VERSION: SQLITE + PARAMS")
 # Setup logs
 os.makedirs("logs", exist_ok=True)
 
