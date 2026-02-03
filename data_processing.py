@@ -2,6 +2,7 @@ from isodate import parse_duration
 from datetime import datetime
 import warnings
 
+
 def transform_channel_data(raw_data):
     """
     Transforms raw YouTube API data into structured records:
@@ -18,6 +19,7 @@ def transform_channel_data(raw_data):
         warnings.warn("Channel metadata not found.")
         return {"channel": {}, "playlists": [], "videos": [], "comments": []}
 
+    # Channel details
     channel = {
         "channel_id": channel_meta["Channel_Id"],
         "channel_name": channel_meta["Channel_Name"],
@@ -56,7 +58,11 @@ def transform_channel_data(raw_data):
             published_str = value.get("PublishedAt", "").replace("Z", "")
             published_dt = datetime.strptime(published_str, "%Y-%m-%dT%H:%M:%S")
 
-            playlist_id = value.get("Playlist_Id") or "uncategorized"
+            playlist_id = value.get("Playlist_Id")
+            if not playlist_id or playlist_id == "uncategorized":
+                # Extra safety to ignore orphaned videos
+                warnings.warn(f"Video {video_id} has no playlist. Skipping.")
+                continue
 
             # Parse duration safely
             try:

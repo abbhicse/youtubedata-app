@@ -5,10 +5,10 @@ from datetime import datetime
 import logging
 import os
 
-# Ensure logs directory
+# Ensure logs directory exists
 os.makedirs("logs", exist_ok=True)
 
-# Logging config
+# Logging configuration
 logging.basicConfig(
     filename="logs/fetch.log",
     level=logging.INFO,
@@ -114,7 +114,10 @@ def fetch_videos(youtube, playlist_id, max_pages=5, comment_pages=2):
             logging.info(f"Fetching videos page {page_count + 1}")
             for item in response.get("items", []):
                 video_id = item["snippet"]["resourceId"]["videoId"]
-                videos[video_id] = fetch_video_details(youtube, video_id, comment_pages)
+                video_data = fetch_video_details(youtube, video_id, comment_pages)
+                if video_data:
+                    video_data["Playlist_Id"] = playlist_id  # ✅ FIX: Attach playlist ID here
+                    videos[video_id] = video_data
             request = youtube.playlistItems().list_next(request, response)
             page_count += 1
 
