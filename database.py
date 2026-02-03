@@ -16,10 +16,10 @@ def connect_to_db(db_path="youtube_data.db"):
     try:
         conn = sql.connect(db_path, detect_types=sql.PARSE_DECLTYPES | sql.PARSE_COLNAMES, check_same_thread=False)
         conn.row_factory = sql.Row  # For dict-like access
-        logging.info("✅ SQLite connection successful.")
+        logging.info("SQLite connection successful.")
         return conn
     except Exception as e:
-        logging.error(f"❌ Failed to connect to SQLite: {e}")
+        logging.error(f"Failed to connect to SQLite: {e}")
         raise
 
 def create_database(conn, db_name):
@@ -75,7 +75,7 @@ def create_tables(conn):
             );
         """)
         conn.commit()
-        logging.info("✅ Tables created successfully.")
+        logging.info("Tables created successfully.")
     finally:
         cursor.close()
 
