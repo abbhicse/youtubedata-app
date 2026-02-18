@@ -20,7 +20,7 @@ query_options = {
     "Which videos have the highest likes, and what are their channel names?": "most_liked_videos",
     "What is the total number of likes and dislikes for each video?": "video_likes_dislikes",
     "What is the total number of views for each channel?": "channel_total_views",
-    "Which channels have published videos in 2022?": "channels_published_2022",
+    "Which channels have published videos in 2026?": "channels_published_2026",
     "What is the average duration of all videos in each channel?": "average_video_duration",
     "Which videos have the highest number of comments, and what are their channels?": "most_commented_videos"
 }

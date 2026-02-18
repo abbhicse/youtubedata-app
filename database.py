@@ -212,12 +212,12 @@ def get_query_results(conn, query_type):
         "channel_total_views": """
             SELECT channel_name, channel_views AS total_views FROM Channel;
         """,
-        "channels_published_2022": """
+        "channels_published_2026": """
             SELECT DISTINCT Channel.channel_name
             FROM Video
             JOIN Playlist ON Video.playlist_id = Playlist.playlist_id
             JOIN Channel ON Playlist.channel_id = Channel.channel_id
-            WHERE strftime('%Y', published_date) = '2022';
+            WHERE strftime('%Y', published_date) = '2026';
         """,
         "average_video_duration": """
             SELECT Channel.channel_name, ROUND(AVG(Video.duration)/60, 2) AS avg_duration_minutes
